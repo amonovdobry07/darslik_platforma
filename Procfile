@@ -1,0 +1,1 @@
+web: gunicorn darslik_platforma.wsgi:application
