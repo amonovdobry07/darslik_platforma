@@ -1,12 +1,11 @@
 from pathlib import Path
 from decouple import config, Csv
 from datetime import timedelta
-import dj_database_url
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = config('SECRET_KEY')
-DEBUG = config('DEBUG', default=False, cast=bool)
+SECRET_KEY = config('SECRET_KEY', default='django-insecure-ubo!=a0btq+_wm^tc8c$)q%@_^ip#!v=11160&+ii_g0s*d42@')
+DEBUG = config('DEBUG', default=True, cast=bool)
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1', cast=Csv())
 
 INSTALLED_APPS = [
@@ -30,7 +29,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
-    'whitenoise.middleware.WhiteNoiseMiddleware',  # ← YANGI (security'dan keyin)
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -60,22 +59,13 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'darslik_platforma.wsgi.application'
 
-# ============ DATABASE ============
-# Local — SQLite, Production — PostgreSQL (DATABASE_URL bo'lsa)
-if config('DATABASE_URL', default=''):
-    DATABASES = {
-        'default': dj_database_url.config(
-            default=config('DATABASE_URL'),
-            conn_max_age=600,
-        )
+# ============ DATABASE — SQLite ============
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': BASE_DIR / 'db.sqlite3',
     }
-else:
-    DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': BASE_DIR / 'db.sqlite3',
-        }
-    }
+}
 
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
@@ -99,7 +89,6 @@ MEDIA_ROOT = BASE_DIR / 'media'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# Custom User Model
 AUTH_USER_MODEL = 'darslik_platforma_bbc.User'
 
 # ============ DRF ============
@@ -128,15 +117,7 @@ CORS_ALLOWED_ORIGINS = config(
     cast=Csv()
 )
 
-# Production uchun — agar Vercel domain'ini aniq bilmasangiz
 CORS_ALLOW_CREDENTIALS = True
-
-# ============ SECURITY (Production) ============
-if not DEBUG:
-    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-    SECURE_SSL_REDIRECT = True
-    SESSION_COOKIE_SECURE = True
-    CSRF_COOKIE_SECURE = True
 
 # ============ SWAGGER ============
 SPECTACULAR_SETTINGS = {
