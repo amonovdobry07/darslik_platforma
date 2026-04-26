@@ -3,6 +3,10 @@ from django.contrib.auth import get_user_model
 from .models import Category, Course, Lesson
 from .models import Enrollment
 from .models import Review
+from .models import LessonProgress 
+from .models import Certificate
+from .models import Quiz, Question, Answer, QuizAttempt
+from .models import Notification
 
 User = get_user_model()
 
@@ -131,3 +135,155 @@ class ChangePasswordSerializer(serializers.Serializer):
         if attrs['new_password'] != attrs['new_password2']:
             raise serializers.ValidationError({"new_password": "Yangi parollar mos kelmadi!"})
         return attrs
+    
+class LessonProgressSerializer(serializers.ModelSerializer):
+    lesson_title = serializers.CharField(source='lesson.title', read_only=True)
+    course_id = serializers.IntegerField(source='lesson.course.id', read_only=True)
+    
+    class Meta:
+        model = LessonProgress
+        fields = [
+            'id', 
+            'lesson', 
+            'lesson_title',
+            'course_id',
+            'is_completed', 
+            'completed_at', 
+            'watch_time_seconds',
+            'created_at',
+            'updated_at'
+        ]
+        read_only_fields = ['student', 'completed_at']
+
+
+class CertificateSerializer(serializers.ModelSerializer):
+    course_title = serializers.CharField(source='course.title', read_only=True)
+    course_thumbnail = serializers.ImageField(source='course.thumbnail', read_only=True)
+    instructor_name = serializers.CharField(source='course.instructor.username', read_only=True)
+    
+    class Meta:
+        model = Certificate
+        fields = [
+            'id',
+            'certificate_id',
+            'student_name',
+            'course',
+            'course_title',
+            'course_thumbnail',
+            'instructor_name',
+            'issued_at'
+        ]
+        read_only_fields = ['certificate_id', 'student_name', 'issued_at']
+
+class AnswerSerializer(serializers.ModelSerializer):
+    """Instructor uchun — to'g'ri javob ham ko'rinadi"""
+    class Meta:
+        model = Answer
+        fields = ['id', 'question', 'text', 'is_correct', 'order']
+
+
+class AnswerStudentSerializer(serializers.ModelSerializer):
+    """Talabaga ko'rinadigan — to'g'ri javob ko'rinmaydi"""
+    class Meta:
+        model = Answer
+        fields = ['id', 'text', 'order']
+
+
+class QuestionSerializer(serializers.ModelSerializer):
+    answers = AnswerSerializer(many=True, read_only=True)
+    
+    class Meta:
+        model = Question
+        fields = ['id', 'quiz', 'text', 'order', 'answers']
+
+
+class QuestionStudentSerializer(serializers.ModelSerializer):
+    """Talabaga — to'g'ri javoblarsiz"""
+    answers = AnswerStudentSerializer(many=True, read_only=True)
+    
+    class Meta:
+        model = Question
+        fields = ['id', 'text', 'order', 'answers']
+
+
+class QuizSerializer(serializers.ModelSerializer):
+    questions = QuestionSerializer(many=True, read_only=True)
+    questions_count = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Quiz
+        fields = [
+            'id', 
+            'lesson', 
+            'title', 
+            'description', 
+            'pass_score',
+            'questions',
+            'questions_count'
+        ]
+    
+    def get_questions_count(self, obj):
+        return obj.questions.count()
+
+
+class QuizStudentSerializer(serializers.ModelSerializer):
+    """Talabaga — to'g'ri javoblarsiz"""
+    questions = QuestionStudentSerializer(many=True, read_only=True)
+    questions_count = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Quiz
+        fields = [
+            'id',
+            'lesson',
+            'title',
+            'description',
+            'pass_score',
+            'questions',
+            'questions_count'
+        ]
+    
+    def get_questions_count(self, obj):
+        return obj.questions.count()
+
+
+class QuizAttemptSerializer(serializers.ModelSerializer):
+    quiz_title = serializers.CharField(source='quiz.title', read_only=True)
+    lesson_title = serializers.CharField(source='quiz.lesson.title', read_only=True)
+    
+    class Meta:
+        model = QuizAttempt
+        fields = [
+            'id',
+            'quiz',
+            'quiz_title',
+            'lesson_title',
+            'score',
+            'total_questions',
+            'correct_answers',
+            'is_passed',
+            'completed_at'
+        ]
+        read_only_fields = ['student', 'completed_at']
+
+
+class NotificationSerializer(serializers.ModelSerializer):
+    course_title = serializers.CharField(source='course.title', read_only=True)
+    course_thumbnail = serializers.ImageField(source='course.thumbnail', read_only=True)
+    
+    class Meta:
+        model = Notification
+        fields = [
+            'id',
+            'notification_type',
+            'title',
+            'message',
+            'course',
+            'course_title',
+            'course_thumbnail',
+            'link',
+            'is_read',
+            'created_at',
+            'read_at'
+        ]
+        read_only_fields = ['user', 'created_at', 'read_at']

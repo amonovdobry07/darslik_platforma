@@ -1,5 +1,6 @@
 from django.contrib.auth.models import AbstractUser
 from django.db import models
+import uuid
 
 
 class User(AbstractUser):
@@ -102,6 +103,7 @@ class Enrollment(models.Model):
     )
     enrolled_at = models.DateTimeField(auto_now_add=True)
     is_completed = models.BooleanField(default=False)
+    completed_at = models.DateTimeField(null=True, blank=True)
     progress = models.PositiveIntegerField(default=0, help_text="0-100%")
 
     class Meta:
@@ -110,6 +112,43 @@ class Enrollment(models.Model):
 
     def __str__(self):
         return f"{self.student.username} → {self.course.title}"
+    def update_progress(self):
+        """Progress'ni avtomatik hisoblash"""
+        total_lessons = self.course.lessons.count()
+        if total_lessons == 0:
+            self.progress = 0
+            self.save()
+            return
+        
+        completed_lessons = LessonProgress.objects.filter(
+            student=self.student,
+            lesson__course=self.course,
+            is_completed=True
+        ).count()
+        
+        # Foiz hisoblash
+        new_progress = int((completed_lessons / total_lessons) * 100)
+        self.progress = new_progress
+        
+        # Agar 100% bo'lsa — kurs tugadi
+        if new_progress >= 100 and not self.is_completed:
+            from django.utils import timezone
+            self.is_completed = True
+            self.completed_at = timezone.now()
+        
+        self.save()
+    
+    def get_completed_lessons_count(self):
+        """Tugatilgan darslar soni"""
+        return LessonProgress.objects.filter(
+            student=self.student,
+            lesson__course=self.course,
+            is_completed=True
+        ).count()
+    
+    def get_total_lessons_count(self):
+        """Jami darslar soni"""
+        return self.course.lessons.count()
     
 class Review(models.Model):
     student = models.ForeignKey(
@@ -136,3 +175,255 @@ class Review(models.Model):
 
     def __str__(self):
         return f"{self.student.username} → {self.course.title} ({self.rating}⭐)"
+    
+
+# ============ YANGI MODEL — LessonProgress ============
+class LessonProgress(models.Model):
+    """Talabaning har bir dars bo'yicha taraqqiyoti"""
+    student = models.ForeignKey(
+        User, 
+        on_delete=models.CASCADE,
+        related_name='lesson_progresses'
+    )
+    lesson = models.ForeignKey(
+        Lesson, 
+        on_delete=models.CASCADE,
+        related_name='student_progresses'
+    )
+    enrollment = models.ForeignKey(
+        Enrollment,
+        on_delete=models.CASCADE,
+        related_name='lesson_progresses',
+        null=True,
+        blank=True
+    )
+    is_completed = models.BooleanField(default=False)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    watch_time_seconds = models.IntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ['student', 'lesson']
+        ordering = ['-updated_at']
+        verbose_name = "Dars taraqqiyoti"
+        verbose_name_plural = "Dars taraqqiyotlari"
+
+    def __str__(self):
+        return f"{self.student.username} - {self.lesson.title}"
+
+    def save(self, *args, **kwargs):
+        # Agar tugatilgan deb belgilangan bo'lsa va vaqti yo'q bo'lsa
+        if self.is_completed and not self.completed_at:
+            from django.utils import timezone
+            self.completed_at = timezone.now()
+        super().save(*args, **kwargs)
+        
+        # Enrollment'dagi progress'ni yangilash
+        if self.enrollment:
+            self.enrollment.update_progress()
+
+
+class Certificate(models.Model):
+    """Talabaga beriladigan sertifikat"""
+    student = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='certificates'
+    )
+    course = models.ForeignKey(
+        Course,
+        on_delete=models.CASCADE,
+        related_name='certificates'
+    )
+    enrollment = models.OneToOneField(
+        Enrollment,
+        on_delete=models.CASCADE,
+        related_name='certificate',
+        null=True,
+        blank=True
+    )
+    
+    # Unique sertifikat ID (qog'ozda ko'rinadi)
+    certificate_id = models.UUIDField(
+        default=uuid.uuid4, 
+        editable=False, 
+        unique=True
+    )
+    
+    # Talabaning ismi (sertifikatda ko'rinadi)
+    student_name = models.CharField(max_length=200)
+    
+    # Sana
+    issued_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        unique_together = ['student', 'course']
+        ordering = ['-issued_at']
+        verbose_name = "Sertifikat"
+        verbose_name_plural = "Sertifikatlar"
+    
+    def __str__(self):
+        return f"{self.student.username} - {self.course.title}"
+    
+    def get_verification_url(self):
+        """Sertifikatni tekshirish URL"""
+        return f"/certificates/verify/{self.certificate_id}/"
+    
+
+# ============ QUIZ MODELS ============
+
+class Quiz(models.Model):
+    """Dars uchun test"""
+    lesson = models.OneToOneField(
+        Lesson,
+        on_delete=models.CASCADE,
+        related_name='quiz'
+    )
+    title = models.CharField(max_length=200, default="Dars testi")
+    description = models.TextField(blank=True)
+    pass_score = models.IntegerField(
+        default=70,
+        help_text="O'tish uchun minimal foiz (0-100)"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        verbose_name = "Test"
+        verbose_name_plural = "Testlar"
+    
+    def __str__(self):
+        return f"{self.lesson.title} - Test"
+
+
+class Question(models.Model):
+    """Test savoli"""
+    quiz = models.ForeignKey(
+        Quiz,
+        on_delete=models.CASCADE,
+        related_name='questions'
+    )
+    text = models.TextField()
+    order = models.IntegerField(default=0)
+    
+    class Meta:
+        ordering = ['order']
+        verbose_name = "Savol"
+        verbose_name_plural = "Savollar"
+    
+    def __str__(self):
+        return f"{self.quiz.lesson.title} - Savol {self.order}"
+
+
+class Answer(models.Model):
+    """Savol uchun javob varianti"""
+    question = models.ForeignKey(
+        Question,
+        on_delete=models.CASCADE,
+        related_name='answers'
+    )
+    text = models.CharField(max_length=500)
+    is_correct = models.BooleanField(default=False)
+    order = models.IntegerField(default=0)
+    
+    class Meta:
+        ordering = ['order']
+        verbose_name = "Javob"
+        verbose_name_plural = "Javoblar"
+    
+    def __str__(self):
+        return f"{self.text[:50]}"
+
+
+class QuizAttempt(models.Model):
+    """Talabaning test urinishi"""
+    student = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='quiz_attempts'
+    )
+    quiz = models.ForeignKey(
+        Quiz,
+        on_delete=models.CASCADE,
+        related_name='attempts'
+    )
+    score = models.IntegerField(default=0, help_text="To'g'ri javoblar foizi")
+    total_questions = models.IntegerField(default=0)
+    correct_answers = models.IntegerField(default=0)
+    is_passed = models.BooleanField(default=False)
+    completed_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        ordering = ['-completed_at']
+        verbose_name = "Test urinishi"
+        verbose_name_plural = "Test urinishlari"
+    
+    def __str__(self):
+        return f"{self.student.username} - {self.quiz.lesson.title} ({self.score}%)"
+    
+
+class Notification(models.Model):
+    """Foydalanuvchi bildirishnomalari"""
+    
+    NOTIFICATION_TYPES = [
+        ('enrollment', 'Yangi yozilish'),
+        ('review', 'Yangi sharh'),
+        ('certificate', 'Sertifikat tayyor'),
+        ('new_lesson', 'Yangi dars'),
+        ('new_course', 'Yangi kurs'),
+        ('quiz_passed', 'Test muvaffaqiyatli'),
+        ('quiz_failed', 'Test muvaffaqiyatsiz'),
+        ('course_completed', 'Kurs tugatildi'),
+        ('system', 'Tizim xabari'),
+    ]
+    
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='notifications',
+        verbose_name="Foydalanuvchi"
+    )
+    
+    notification_type = models.CharField(
+        max_length=30,
+        choices=NOTIFICATION_TYPES,
+        default='system',
+        verbose_name="Tur"
+    )
+    
+    title = models.CharField(max_length=200, verbose_name="Sarlavha")
+    message = models.TextField(verbose_name="Xabar")
+    
+    # Qaysi obyektga tegishli (ixtiyoriy)
+    course = models.ForeignKey(
+        Course,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='notifications'
+    )
+    
+    # Bildirishnoma havolasi (bossa qaerga olib boradi)
+    link = models.CharField(max_length=500, blank=True, default='')
+    
+    # O'qilganmi
+    is_read = models.BooleanField(default=False, verbose_name="O'qilgan")
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    read_at = models.DateTimeField(null=True, blank=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = "Bildirishnoma"
+        verbose_name_plural = "Bildirishnomalar"
+    
+    def __str__(self):
+        return f"{self.user.username} - {self.title}"
+    
+    def mark_as_read(self):
+        """Bildirishnomani o'qilgan deb belgilash"""
+        if not self.is_read:
+            from django.utils import timezone
+            self.is_read = True
+            self.read_at = timezone.now()
+            self.save()
