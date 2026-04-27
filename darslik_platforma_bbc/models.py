@@ -427,3 +427,106 @@ class Notification(models.Model):
             self.is_read = True
             self.read_at = timezone.now()
             self.save()
+
+
+class Payment(models.Model):
+    """To'lov tranzaksiyalari"""
+    
+    PAYMENT_METHODS = [
+        ('click', 'Click'),
+        ('payme', 'Payme'),
+        ('card', 'Plastik karta'),
+        ('demo', 'Demo (test)'),
+    ]
+    
+    PAYMENT_STATUS = [
+        ('pending', 'Kutilmoqda'),
+        ('processing', 'Jarayonda'),
+        ('completed', 'Muvaffaqiyatli'),
+        ('failed', 'Muvaffaqiyatsiz'),
+        ('refunded', 'Qaytarildi'),
+    ]
+    
+    # Unique transaction ID
+    transaction_id = models.UUIDField(
+        default=uuid.uuid4,
+        editable=False,
+        unique=True
+    )
+    
+    # Foydalanuvchi va kurs
+    student = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='payments',
+        verbose_name="Talaba"
+    )
+    course = models.ForeignKey(
+        Course,
+        on_delete=models.CASCADE,
+        related_name='payments',
+        verbose_name="Kurs"
+    )
+    
+    # Pul ma'lumotlari
+    amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        verbose_name="Summa"
+    )
+    
+    # To'lov turi va holati
+    payment_method = models.CharField(
+        max_length=20,
+        choices=PAYMENT_METHODS,
+        default='demo',
+        verbose_name="To'lov usuli"
+    )
+    
+    status = models.CharField(
+        max_length=20,
+        choices=PAYMENT_STATUS,
+        default='pending',
+        verbose_name="Holati"
+    )
+    
+    # Click/Payme provider'idan keladigan ma'lumotlar (kelajakda)
+    provider_transaction_id = models.CharField(
+        max_length=200,
+        blank=True,
+        default='',
+        verbose_name="Provider ID"
+    )
+    provider_response = models.JSONField(
+        null=True,
+        blank=True,
+        verbose_name="Provider javobi"
+    )
+    
+    # Vaqt belgilari
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    
+    # Qo'shimcha ma'lumot
+    notes = models.TextField(blank=True, default='')
+    
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = "To'lov"
+        verbose_name_plural = "To'lovlar"
+    
+    def __str__(self):
+        return f"{self.student.username} - {self.course.title} ({self.amount} so'm)"
+    
+    def mark_as_completed(self):
+        """To'lovni muvaffaqiyatli deb belgilash"""
+        from django.utils import timezone
+        self.status = 'completed'
+        self.completed_at = timezone.now()
+        self.save()
+        
+        # Avtomatik enrollment yaratish
+        Enrollment.objects.get_or_create(
+            student=self.student,
+            course=self.course
+        )

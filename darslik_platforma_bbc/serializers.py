@@ -7,6 +7,7 @@ from .models import LessonProgress
 from .models import Certificate
 from .models import Quiz, Question, Answer, QuizAttempt
 from .models import Notification
+from .models import Payment
 
 User = get_user_model()
 
@@ -287,3 +288,35 @@ class NotificationSerializer(serializers.ModelSerializer):
             'read_at'
         ]
         read_only_fields = ['user', 'created_at', 'read_at']
+
+
+class PaymentSerializer(serializers.ModelSerializer):
+    student_name = serializers.CharField(source='student.username', read_only=True)
+    course_title = serializers.CharField(source='course.title', read_only=True)
+    course_thumbnail = serializers.ImageField(source='course.thumbnail', read_only=True)
+    
+    class Meta:
+        model = Payment
+        fields = [
+            'id',
+            'transaction_id',
+            'student',
+            'student_name',
+            'course',
+            'course_title',
+            'course_thumbnail',
+            'amount',
+            'payment_method',
+            'status',
+            'provider_transaction_id',
+            'created_at',
+            'completed_at',
+            'notes'
+        ]
+        read_only_fields = [
+            'student',
+            'transaction_id',
+            'created_at',
+            'completed_at',
+            'provider_transaction_id'
+        ]

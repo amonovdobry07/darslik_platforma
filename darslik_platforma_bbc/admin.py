@@ -13,6 +13,8 @@ from .models import Quiz, Question, Answer, QuizAttempt
 
 from .models import Notification
 
+from .models import Payment
+
 @admin.register(User)
 class CustomUserAdmin(UserAdmin):
     list_display = ['username', 'email', 'role', 'is_staff', 'is_active']
@@ -99,3 +101,11 @@ class NotificationAdmin(admin.ModelAdmin):
     list_filter = ['notification_type', 'is_read', 'created_at']
     search_fields = ['user__username', 'title', 'message']
     readonly_fields = ['created_at', 'read_at']
+
+
+@admin.register(Payment)
+class PaymentAdmin(admin.ModelAdmin):
+    list_display = ['student', 'course', 'amount', 'payment_method', 'status', 'created_at']
+    list_filter = ['status', 'payment_method', 'created_at']
+    search_fields = ['student__username', 'course__title', 'transaction_id']
+    readonly_fields = ['transaction_id', 'created_at', 'completed_at']

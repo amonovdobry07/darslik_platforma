@@ -19,6 +19,7 @@ from .views import (
     AnswerViewSet,    # ← YANGI
     NotificationViewSet,
     InstructorStatsView,
+     PaymentViewSet,
 )
 
 
@@ -39,6 +40,7 @@ router.register('quiz-attempts', QuizAttemptViewSet, basename='quiz-attempts')
 router.register('questions', QuestionViewSet, basename='questions')
 router.register('answers', AnswerViewSet, basename='answers')
 router.register('notifications', NotificationViewSet, basename='notifications')
+router.register('payments', PaymentViewSet, basename='payments')
 
 urlpatterns = [
     path('auth/register/', RegisterView.as_view(), name='register'),

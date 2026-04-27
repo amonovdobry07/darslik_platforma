@@ -51,6 +51,9 @@ from django.db.models import Count, Avg, Sum, Q
 from django.utils import timezone
 from datetime import timedelta
 
+from .models import Payment
+from .serializers import PaymentSerializer
+
 
 
 User = get_user_model()
@@ -728,3 +731,144 @@ class InstructorStatsView(APIView):
             'quiz_stats': quiz_stats,
             'recent_enrollments': recent_enrollments_data
         })
+    
+
+
+class PaymentViewSet(viewsets.ModelViewSet):
+    """To'lov tranzaksiyalari"""
+    serializer_class = PaymentSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        user = self.request.user
+        if user.role == 'instructor':
+            # Instructor o'z kurslari uchun to'lovlarni ko'radi
+            return Payment.objects.filter(course__instructor=user)
+        # Student o'z to'lovlarini ko'radi
+        return Payment.objects.filter(student=user)
+    
+    @action(detail=False, methods=['post'], url_path='initiate')
+    def initiate_payment(self, request):
+        """
+        To'lov boshlash (real Click/Payme bilan integratsiya keyinchalik shu yerda).
+        Hozircha — sandbox/demo rejim.
+        """
+        course_id = request.data.get('course_id')
+        payment_method = request.data.get('payment_method', 'demo')
+        
+        if not course_id:
+            return Response(
+                {'error': 'course_id kerak'},
+                status=400
+            )
+        
+        try:
+            course = Course.objects.get(id=course_id)
+        except Course.DoesNotExist:
+            return Response({'error': 'Kurs topilmadi'}, status=404)
+        
+        # Allaqachon yozilganmi?
+        if Enrollment.objects.filter(student=request.user, course=course).exists():
+            return Response(
+                {'error': 'Siz bu kursga allaqachon yozilgansiz'},
+                status=400
+            )
+        
+        # Bepul kursmi?
+        if course.price == 0:
+            # Bepul — to'g'ridan-to'g'ri enrollment
+            Enrollment.objects.create(student=request.user, course=course)
+            return Response({
+                'status': 'free_enrolled',
+                'message': "Bepul kursga muvaffaqiyatli yozildingiz! 🎉",
+                'course_id': course.id
+            })
+        
+        # Pullik — to'lov yaratish
+        payment = Payment.objects.create(
+            student=request.user,
+            course=course,
+            amount=course.price,
+            payment_method=payment_method,
+            status='pending'
+        )
+        
+        # ⚠️ KELAJAK: Bu yerda Click/Payme API chaqiriladi
+        # Hozircha — Demo rejim
+        # 
+        # Real integration uchun bu yerga qo'shiladi:
+        # if payment_method == 'click':
+        #     payment_url = create_click_payment(payment)
+        # elif payment_method == 'payme':
+        #     payment_url = create_payme_payment(payment)
+        
+        return Response({
+            'status': 'payment_created',
+            'payment_id': payment.id,
+            'transaction_id': str(payment.transaction_id),
+            'amount': float(payment.amount),
+            'course_title': course.title,
+            'payment_method': payment_method,
+            # Real integration'da bu yerda Click/Payme URL bo'ladi:
+            'redirect_url': None,  # Hozircha null
+        })
+    
+    @action(detail=True, methods=['post'], url_path='confirm')
+    def confirm_payment(self, request, pk=None):
+        """
+        To'lovni tasdiqlash (Demo rejim).
+        Real Click/Payme'da bu callback orqali keladi.
+        """
+        try:
+            payment = self.get_queryset().get(pk=pk)
+        except Payment.DoesNotExist:
+            return Response({'error': 'To\'lov topilmadi'}, status=404)
+        
+        # Faqat o'z to'lovini tasdiqlash mumkin
+        if payment.student != request.user:
+            return Response({'error': 'Ruxsat yo\'q'}, status=403)
+        
+        if payment.status == 'completed':
+            return Response({
+                'status': 'already_completed',
+                'message': "To'lov allaqachon tasdiqlangan"
+            })
+        
+        # ⚠️ KELAJAK: Bu yerda Click/Payme'ga signature tekshirish bo'ladi
+        # Hozircha — Demo: avtomatik tasdiqlanadi
+        
+        payment.mark_as_completed()
+        
+        return Response({
+            'status': 'success',
+            'message': "To'lov muvaffaqiyatli! 🎉 Endi kursni boshlashingiz mumkin.",
+            'transaction_id': str(payment.transaction_id),
+            'course_id': payment.course.id
+        })
+    
+    @action(detail=True, methods=['post'], url_path='cancel')
+    def cancel_payment(self, request, pk=None):
+        """To'lovni bekor qilish"""
+        try:
+            payment = self.get_queryset().get(pk=pk)
+        except Payment.DoesNotExist:
+            return Response({'error': 'Topilmadi'}, status=404)
+        
+        if payment.student != request.user:
+            return Response({'error': 'Ruxsat yo\'q'}, status=403)
+        
+        payment.status = 'failed'
+        payment.notes = 'Foydalanuvchi tomonidan bekor qilindi'
+        payment.save()
+        
+        return Response({
+            'status': 'cancelled',
+            'message': "To'lov bekor qilindi"
+        })
+    
+    @action(detail=False, methods=['get'], url_path='my-history')
+    def my_history(self, request):
+        """Foydalanuvchining to'lov tarixi"""
+        payments = Payment.objects.filter(student=request.user).order_by('-created_at')
+        serializer = self.get_serializer(payments, many=True)
+        return Response(serializer.data)
