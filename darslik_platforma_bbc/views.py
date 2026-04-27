@@ -54,6 +54,8 @@ from datetime import timedelta
 from .models import Payment
 from .serializers import PaymentSerializer
 
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+
 
 
 User = get_user_model()
@@ -78,17 +80,99 @@ class CategoryViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
 
 
+# CourseViewSet ichida — YOPIQ! qaysi metodlar bor bo'lsa, shu yerga qo'shing
+
 class CourseViewSet(viewsets.ModelViewSet):
-    queryset = Course.objects.all()
+    """Kurslar ViewSet"""
     serializer_class = CourseSerializer
     permission_classes = [IsInstructorOrReadOnly]
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['category', 'level']
-    search_fields = ['title', 'description']
-    ordering_fields = ['price', 'created_at']
-
-    def perform_create(self, serializer):
-        serializer.save(instructor=self.request.user)
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+    
+    def get_queryset(self):
+        queryset = Course.objects.all()
+        request = self.request
+        
+        # ============ SEARCH ============
+        search = request.query_params.get('search', '').strip()
+        if search:
+            queryset = queryset.filter(
+                Q(title__icontains=search) |
+                Q(description__icontains=search) |
+                Q(instructor__username__icontains=search)
+            )
+        
+        # ============ KATEGORIYA ============
+        category = request.query_params.get('category', '').strip()
+        if category and category != 'all':
+            queryset = queryset.filter(category__slug=category)
+        
+        # ============ DARAJA ============
+        level = request.query_params.get('level', '').strip()
+        if level and level != 'all':
+            queryset = queryset.filter(level=level)
+        
+        # ============ NARX ============
+        # Bepul / Pullik
+        price_type = request.query_params.get('price_type', '').strip()
+        if price_type == 'free':
+            queryset = queryset.filter(price=0)
+        elif price_type == 'paid':
+            queryset = queryset.filter(price__gt=0)
+        
+        # Min/Max narx
+        min_price = request.query_params.get('min_price')
+        max_price = request.query_params.get('max_price')
+        if min_price:
+            try:
+                queryset = queryset.filter(price__gte=float(min_price))
+            except ValueError:
+                pass
+        if max_price:
+            try:
+                queryset = queryset.filter(price__lte=float(max_price))
+            except ValueError:
+                pass
+        
+        # ============ INSTRUCTOR (faqat o'z kurslari uchun) ============
+        if request.query_params.get('my_courses') == 'true' and request.user.is_authenticated:
+            queryset = queryset.filter(instructor=request.user)
+        
+        # ============ SARALASH ============
+        sort_by = request.query_params.get('sort', 'popular')
+        
+        if sort_by == 'popular':
+            queryset = queryset.annotate(
+                students_count=Count('enrollments', distinct=True)
+            ).order_by('-students_count')
+        elif sort_by == 'newest':
+            queryset = queryset.order_by('-created_at')
+        elif sort_by == 'oldest':
+            queryset = queryset.order_by('created_at')
+        elif sort_by == 'cheapest':
+            queryset = queryset.order_by('price')
+        elif sort_by == 'expensive':
+            queryset = queryset.order_by('-price')
+        elif sort_by == 'rating':
+            queryset = queryset.annotate(
+                avg_rating=Avg('reviews__rating')
+            ).order_by('-avg_rating')
+        
+        return queryset.distinct()
+    
+    # Mavjud `lessons`, `reviews` action'larni saqlang
+    @action(detail=True, methods=['get'])
+    def lessons(self, request, pk=None):
+        course = self.get_object()
+        lessons = course.lessons.all().order_by('order')
+        serializer = LessonSerializer(lessons, many=True, context={'request': request})
+        return Response(serializer.data)
+    
+    @action(detail=True, methods=['get'])
+    def reviews(self, request, pk=None):
+        course = self.get_object()
+        reviews = course.reviews.all().order_by('-created_at')
+        serializer = ReviewSerializer(reviews, many=True, context={'request': request})
+        return Response(serializer.data)
 
 
 class LessonViewSet(viewsets.ModelViewSet):
